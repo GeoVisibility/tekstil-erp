@@ -5,17 +5,18 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { OrgType, Role } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { withFormState, type FormState } from "@/lib/form";
 import { requireRole } from "@/lib/session";
 
 const orgSchema = z.object({
-  name: z.string().trim().min(2),
-  type: z.enum(["COMPANY", "SUBCOMPANY", "CUSTOMER"]),
+  name: z.string().trim().min(2, "Ad en az 2 karakter olmalı."),
+  type: z.enum(["COMPANY", "SUBCOMPANY", "CUSTOMER"], "Geçersiz organizasyon tipi."),
   parentId: z.string().optional(),
   phone: z.string().trim().optional(),
   email: z.string().trim().optional(),
 });
 
-export async function createOrganization(formData: FormData) {
+async function createOrganizationImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const d = orgSchema.parse(Object.fromEntries(formData));
 
@@ -40,16 +41,16 @@ export async function createOrganization(formData: FormData) {
 }
 
 const userSchema = z.object({
-  name: z.string().trim().min(2),
-  email: z.string().trim().toLowerCase().email(),
-  password: z.string().min(8, "Şifre en az 8 karakter olmalı"),
+  name: z.string().trim().min(2, "Ad soyad en az 2 karakter olmalı."),
+  email: z.string().trim().toLowerCase().email("Geçerli bir e-posta girin."),
+  password: z.string().min(8, "Şifre en az 8 karakter olmalı."),
   organizationId: z.string().optional(),
   role: z.enum(["DEVELOPER", "COMPANY", "SUBCOMPANY", "CUSTOMER"]).optional(),
 });
 
 const ROLE_FOR_ORG: Record<OrgType, Role> = { COMPANY: "COMPANY", SUBCOMPANY: "SUBCOMPANY", CUSTOMER: "CUSTOMER" };
 
-export async function createUser(formData: FormData) {
+async function createUserImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const d = userSchema.parse(Object.fromEntries(formData));
 
@@ -61,7 +62,9 @@ export async function createUser(formData: FormData) {
     role = "DEVELOPER";
     organizationId = null;
   } else {
-    if (!organizationId) throw new Error("Organizasyon seçilmeli.");
+    if (!organizationId) {
+      throw new Error("Organizasyon seçilmeli. Henüz yoksa önce Firmalar ekranından bir firma ekleyin.");
+    }
     const org = await prisma.organization.findFirst({
       where: {
         id: organizationId,
@@ -82,7 +85,7 @@ export async function createUser(formData: FormData) {
   revalidatePath("/admin/users");
 }
 
-export async function toggleUserActive(formData: FormData) {
+async function toggleUserActiveImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const id = String(formData.get("userId"));
   if (id === s.uid) throw new Error("Kendi hesabınızı pasif yapamazsınız.");
@@ -97,4 +100,16 @@ export async function toggleUserActive(formData: FormData) {
   if (!user) throw new Error("Kullanıcı bulunamadı.");
   await prisma.user.update({ where: { id }, data: { active: !user.active } });
   revalidatePath("/admin/users");
+}
+
+// ─── Form'lara açılan action'lar (hatalar sayfayı çökertmez, uyarı olarak döner) ───
+
+export async function createOrganization(_: FormState, formData: FormData) {
+  return withFormState(() => createOrganizationImpl(formData));
+}
+export async function createUser(_: FormState, formData: FormData) {
+  return withFormState(() => createUserImpl(formData));
+}
+export async function toggleUserActive(_: FormState, formData: FormData) {
+  return withFormState(() => toggleUserActiveImpl(formData));
 }

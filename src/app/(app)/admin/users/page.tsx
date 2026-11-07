@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { ActionForm } from "@/components/ActionForm";
 import { Badge, PageHeader } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import { ORG_TYPE_LABELS } from "@/lib/labels";
@@ -40,10 +42,10 @@ export default async function UsersPage() {
                   <td className="td">{u.organization?.name ?? "—"}</td>
                   <td className="td text-right">
                     {u.id !== s.uid && (
-                      <form action={toggleUserActive}>
+                      <ActionForm action={toggleUserActive}>
                         <input type="hidden" name="userId" value={u.id} />
                         <button className="btn btn-xs">{u.active ? "Pasif yap" : "Aktif yap"}</button>
-                      </form>
+                      </ActionForm>
                     )}
                   </td>
                 </tr>
@@ -52,7 +54,7 @@ export default async function UsersPage() {
           </table>
         </div>
 
-        <form action={createUser} className="card card-pad h-fit space-y-3">
+        <ActionForm action={createUser} className="card card-pad h-fit space-y-3">
           <h2 className="font-semibold">Yeni kullanıcı</h2>
           <div>
             <label className="label">Ad soyad *</label>
@@ -68,11 +70,18 @@ export default async function UsersPage() {
           </div>
           <div>
             <label className="label">Organizasyon</label>
-            <select name="organizationId" className="input">
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>{o.name} ({ORG_TYPE_LABELS[o.type]})</option>
-              ))}
-            </select>
+            {orgs.length === 0 ? (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Henüz organizasyon yok. Firma, alt firma veya müşteri kullanıcısı eklemek için önce{" "}
+                <Link href="/admin/organizations" className="font-medium underline">Firmalar</Link> ekranından kayıt açın.
+              </p>
+            ) : (
+              <select name="organizationId" className="input">
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>{o.name} ({ORG_TYPE_LABELS[o.type]})</option>
+                ))}
+              </select>
+            )}
           </div>
           {s.role === "DEVELOPER" && (
             <label className="flex items-center gap-2 text-sm">
@@ -81,7 +90,7 @@ export default async function UsersPage() {
             </label>
           )}
           <button className="btn-primary w-full">Kullanıcı oluştur</button>
-        </form>
+        </ActionForm>
       </div>
     </>
   );

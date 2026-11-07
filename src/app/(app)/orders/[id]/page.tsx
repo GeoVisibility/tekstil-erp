@@ -1,3 +1,4 @@
+import { ActionForm } from "@/components/ActionForm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TaskStatusButtons } from "@/components/TaskStatusButtons";
@@ -93,10 +94,10 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <>
             <Link href="/orders" className="btn">← Siparişler</Link>
             {manage && (
-              <form action={cancelOrder}>
+              <ActionForm action={cancelOrder}>
                 <input type="hidden" name="orderId" value={order.id} />
                 <button className="btn text-red-600">Siparişi iptal et</button>
-              </form>
+              </ActionForm>
             )}
           </>
         }
@@ -167,7 +168,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                   </td>
                   <td className="td">
                     {manage ? (
-                      <form action={updateComponent} className="flex flex-wrap items-center gap-1">
+                      <ActionForm action={updateComponent} className="flex flex-wrap items-center gap-1">
                         <input type="hidden" name="componentId" value={c.id} />
                         <select name="supplyStatus" defaultValue={c.supplyStatus} className="input-sm">
                           {Object.entries(SUPPLY_STATUS).map(([k, v]) => (
@@ -176,7 +177,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                         </select>
                         <input name="supplier" defaultValue={c.supplier ?? ""} placeholder="Tedarikçi" className="input-sm w-28" />
                         <button className="btn btn-xs">Kaydet</button>
-                      </form>
+                      </ActionForm>
                     ) : (
                       <Badge tone={SUPPLY_STATUS[c.supplyStatus].tone}>{SUPPLY_STATUS[c.supplyStatus].label}</Badge>
                     )}
@@ -196,14 +197,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             <p className="text-sm text-slate-500">Hangi parçanın hangi işlemde, kim tarafından, ne zaman yapılacağı</p>
           </div>
           {manage && tasks.length === 0 && (
-            <form action={generatePlan} className="flex items-end gap-2">
+            <ActionForm action={generatePlan} className="flex items-end gap-2">
               <input type="hidden" name="orderId" value={order.id} />
               <div>
                 <label className="label">Plan başlangıcı</label>
                 <input type="date" name="startDate" className="input" defaultValue={toInputDate(new Date())} />
               </div>
               <button className="btn-primary">Planı otomatik oluştur</button>
-            </form>
+            </ActionForm>
           )}
         </div>
 
@@ -272,14 +273,14 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                     <td className="td">
                       {manage && (
                         <div className="flex flex-col items-end gap-1">
-                          <form id={formId} action={updateTask}>
+                          <ActionForm id={formId} action={updateTask}>
                             <input type="hidden" name="taskId" value={t.id} />
                             <button className="btn btn-xs">Kaydet</button>
-                          </form>
-                          <form action={deleteTask}>
+                          </ActionForm>
+                          <ActionForm action={deleteTask}>
                             <input type="hidden" name="taskId" value={t.id} />
                             <button className="btn btn-xs text-red-600">Sil</button>
-                          </form>
+                          </ActionForm>
                         </div>
                       )}
                     </td>
@@ -291,7 +292,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         )}
 
         {manage && (
-          <form action={createTask} className="card-pad grid gap-3 border-t border-slate-200 bg-slate-50/60 sm:grid-cols-2 lg:grid-cols-6">
+          <ActionForm action={createTask} className="card-pad grid gap-3 border-t border-slate-200 bg-slate-50/60 sm:grid-cols-2 lg:grid-cols-6">
             <input type="hidden" name="orderId" value={order.id} />
             <div className="sm:col-span-2 lg:col-span-6 text-sm font-semibold">Görev ekle</div>
             <div>
@@ -341,7 +342,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <input name="note" className="input" placeholder="Not (opsiyonel)" />
             </div>
             <button className="btn-primary">Görevi ekle</button>
-          </form>
+          </ActionForm>
         )}
       </section>
     </>

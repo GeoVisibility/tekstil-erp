@@ -1,3 +1,4 @@
+import { ActionForm } from "@/components/ActionForm";
 import { Badge, PageHeader } from "@/components/ui";
 import { prisma } from "@/lib/db";
 import { ORG_TYPE_LABELS } from "@/lib/labels";
@@ -46,7 +47,7 @@ export default async function OrganizationsPage() {
           </table>
         </div>
 
-        <form action={createOrganization} className="card card-pad h-fit space-y-3">
+        <ActionForm action={createOrganization} className="card card-pad h-fit space-y-3">
           <h2 className="font-semibold">Yeni ekle</h2>
           <div>
             <label className="label">Ad *</label>
@@ -54,7 +55,8 @@ export default async function OrganizationsPage() {
           </div>
           <div>
             <label className="label">Tip *</label>
-            <select name="type" className="input" defaultValue="SUBCOMPANY">
+            {/* Hiç firma yoksa (ilk kurulum) varsayılan tip "Firma" olsun */}
+            <select name="type" className="input" defaultValue={s.role === "DEVELOPER" && companies.length === 0 ? "COMPANY" : "SUBCOMPANY"}>
               {s.role === "DEVELOPER" && <option value="COMPANY">Firma</option>}
               <option value="SUBCOMPANY">Alt Firma</option>
               <option value="CUSTOMER">Müşteri</option>
@@ -82,7 +84,7 @@ export default async function OrganizationsPage() {
             </div>
           </div>
           <button className="btn-primary w-full">Kaydet</button>
-        </form>
+        </ActionForm>
       </div>
     </>
   );

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { ComponentCategory, Prisma, SupplyStatus, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { withFormState, type FormState } from "@/lib/form";
 import { syncOrderStatus } from "@/lib/progress";
 import { orderScope, taskScope } from "@/lib/scope";
 import { requireRole, requireSession } from "@/lib/session";
@@ -70,7 +71,7 @@ const orderSchema = z.object({
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL"];
 const CATEGORIES: ComponentCategory[] = ["FABRIC", "TRIM", "PRINT", "EMBROIDERY", "LABEL", "PACKAGING"];
 
-export async function createOrder(formData: FormData) {
+async function createOrderImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const data = orderSchema.parse(Object.fromEntries(formData));
 
@@ -154,7 +155,7 @@ export async function createOrder(formData: FormData) {
 // ─── Plan & görevler ───────────────────────────────────────────
 
 /** Ürünün işlem şablonlarından görevleri otomatik oluşturur (sıralı tarihlerle). */
-export async function generatePlan(formData: FormData) {
+async function generatePlanImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const order = await manageableOrder(s, String(formData.get("orderId")));
 
@@ -194,7 +195,7 @@ export async function generatePlan(formData: FormData) {
   revalidatePath(`/orders/${order.id}`);
 }
 
-export async function createTask(formData: FormData) {
+async function createTaskImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const order = await manageableOrder(s, String(formData.get("orderId")));
 
@@ -230,7 +231,7 @@ export async function createTask(formData: FormData) {
 }
 
 /** Firma: görevin atamasını ve tarihlerini günceller. */
-export async function updateTask(formData: FormData) {
+async function updateTaskImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const task = await prisma.task.findFirst({
     where: { id: String(formData.get("taskId")), ...taskScope(s) },
@@ -257,7 +258,7 @@ export async function updateTask(formData: FormData) {
 const STATUSES: TaskStatus[] = ["PENDING", "IN_PROGRESS", "DONE", "BLOCKED"];
 
 /** Görev durumunu değiştirir. Firma tüm görevleri, alt firma yalnızca kendine atananları. */
-export async function setTaskStatus(formData: FormData) {
+async function setTaskStatusImpl(formData: FormData) {
   const s = await requireSession();
   if (s.role === "CUSTOMER") throw new Error("Yetkiniz yok.");
 
@@ -281,7 +282,7 @@ export async function setTaskStatus(formData: FormData) {
   revalidatePath("/dashboard");
 }
 
-export async function deleteTask(formData: FormData) {
+async function deleteTaskImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const task = await prisma.task.findFirst({ where: { id: String(formData.get("taskId")), ...taskScope(s) } });
   if (!task) throw new Error("Görev bulunamadı.");
@@ -294,7 +295,7 @@ export async function deleteTask(formData: FormData) {
 
 const SUPPLY: SupplyStatus[] = ["PENDING", "ORDERED", "IN_STOCK"];
 
-export async function updateComponent(formData: FormData) {
+async function updateComponentImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const comp = await prisma.orderComponent.findFirst({
     where: { id: String(formData.get("componentId")), order: orderScope(s) },
@@ -311,10 +312,37 @@ export async function updateComponent(formData: FormData) {
   revalidatePath(`/orders/${comp.orderId}`);
 }
 
-export async function cancelOrder(formData: FormData) {
+async function cancelOrderImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const order = await manageableOrder(s, String(formData.get("orderId")));
   await prisma.productionOrder.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
   revalidatePath(`/orders/${order.id}`);
   revalidatePath("/orders");
+}
+
+// ─── Form'lara açılan action'lar (hatalar sayfayı çökertmez, uyarı olarak döner) ───
+
+export async function createOrder(_: FormState, formData: FormData) {
+  return withFormState(() => createOrderImpl(formData));
+}
+export async function generatePlan(_: FormState, formData: FormData) {
+  return withFormState(() => generatePlanImpl(formData));
+}
+export async function createTask(_: FormState, formData: FormData) {
+  return withFormState(() => createTaskImpl(formData));
+}
+export async function updateTask(_: FormState, formData: FormData) {
+  return withFormState(() => updateTaskImpl(formData));
+}
+export async function setTaskStatus(_: FormState, formData: FormData) {
+  return withFormState(() => setTaskStatusImpl(formData));
+}
+export async function deleteTask(_: FormState, formData: FormData) {
+  return withFormState(() => deleteTaskImpl(formData));
+}
+export async function updateComponent(_: FormState, formData: FormData) {
+  return withFormState(() => updateComponentImpl(formData));
+}
+export async function cancelOrder(_: FormState, formData: FormData) {
+  return withFormState(() => cancelOrderImpl(formData));
 }

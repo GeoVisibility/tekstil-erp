@@ -1,3 +1,4 @@
+import { ActionForm } from "@/components/ActionForm";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui";
@@ -62,7 +63,7 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
           </>
         }
       />
-      <form action={createOrder} className="space-y-6">
+      <ActionForm action={createOrder} className="space-y-6">
         <input type="hidden" name="productTypeId" value={product.id} />
 
         <section className="card card-pad">
@@ -187,7 +188,7 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
           <Link href="/orders" className="btn">Vazgeç</Link>
           <button className="btn-primary">Siparişi oluştur</button>
         </div>
-      </form>
+      </ActionForm>
     </>
   );
 }

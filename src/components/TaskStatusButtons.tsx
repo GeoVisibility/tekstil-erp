@@ -1,3 +1,4 @@
+import { ActionForm } from "@/components/ActionForm";
 import type { TaskStatus } from "@prisma/client";
 import { setTaskStatus } from "@/app/(app)/orders/actions";
 
@@ -18,11 +19,11 @@ export function TaskStatusButtons({ taskId, status }: { taskId: string; status: 
   return (
     <div className="flex flex-wrap gap-1">
       {TRANSITIONS[status].map((t) => (
-        <form key={t.to} action={setTaskStatus}>
+        <ActionForm key={t.to} action={setTaskStatus}>
           <input type="hidden" name="taskId" value={taskId} />
           <input type="hidden" name="status" value={t.to} />
           <button className={`${t.primary ? "btn-primary" : "btn"} btn-xs`}>{t.label}</button>
-        </form>
+        </ActionForm>
       ))}
     </div>
   );
