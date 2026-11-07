@@ -40,9 +40,24 @@ export type Tone = "gray" | "blue" | "amber" | "green" | "red";
 
 export function formatDate(d: Date | string | null | undefined) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 export function toInputDate(d: Date | null | undefined) {
   return d ? new Date(d).toISOString().slice(0, 10) : "";
+}
+
+// ─── Tarih yardımcıları ────────────────────────────────────────
+// Takvim tarihleri (termin, geliş vb.) UTC gece yarısı olarak saklanır; böylece
+// sunucu/tarayıcı saat diliminden bağımsız olarak hep aynı gün görünür.
+
+/** "YYYY-MM-DD" → UTC gece yarısı Date */
+export function parseDateInput(v: string) {
+  return new Date(v + "T00:00:00Z");
+}
+
+/** Türkiye saatine göre bugünün tarihi, UTC gece yarısı olarak */
+export function today() {
+  const iso = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" }).format(new Date());
+  return parseDateInput(iso);
 }

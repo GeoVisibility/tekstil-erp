@@ -1,3 +1,4 @@
+import { today as todayDate } from "@/lib/labels";
 import Link from "next/link";
 import { OrderTable, orderRowInclude } from "@/components/OrderTable";
 import { PageHeader } from "@/components/ui";
@@ -19,7 +20,7 @@ function Stat({ label, value, href, tone = "text-slate-900" }: { label: string; 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   const s = await requireSession();
   const { denied } = await searchParams;
-  const today = new Date(new Date().toDateString());
+  const today = todayDate();
   const tScope = taskScope(s);
   const activeOrder = { order: { status: { not: "CANCELLED" as const } } };
 

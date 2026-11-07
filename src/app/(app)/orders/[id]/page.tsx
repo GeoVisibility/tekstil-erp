@@ -7,7 +7,6 @@ import { prisma } from "@/lib/db";
 import {
   CATEGORY_LABELS,
   ORDER_STATUS,
-  SUPPLY_STATUS,
   TASK_STATUS,
   formatDate,
   toInputDate,
@@ -17,7 +16,8 @@ import { componentStage, orderProgress, processSummary } from "@/lib/progress";
 import { canManage } from "@/lib/roles";
 import { orderScope } from "@/lib/scope";
 import { requireSession } from "@/lib/session";
-import { cancelOrder, createTask, deleteTask, generatePlan, updateComponent, updateTask } from "../actions";
+import { cancelOrder, createTask, deleteTask, generatePlan, updateTask } from "../actions";
+import { ComponentsEditor } from "@/components/ComponentsEditor";
 
 const STAGE_TONE: Record<string, Tone> = { none: "gray", done: "green", active: "amber", blocked: "red", waiting: "blue" };
 
@@ -131,63 +131,28 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         </section>
       </div>
 
-      {/* Parçalar */}
-      <section className="card mb-6 overflow-x-auto">
-        <div className="card-pad pb-3">
-          <h2 className="font-semibold">Parçalar ve malzemeler</h2>
-          <p className="text-sm text-slate-500">Her parçanın tedarik durumu ve şu an hangi işlemde olduğu</p>
-        </div>
-        <table className="w-full min-w-[900px]">
-          <thead className="border-y border-slate-200 bg-slate-50">
-            <tr>
-              <th className="th">Parça</th>
-              <th className="th">Detay</th>
-              <th className="th text-right">Miktar</th>
-              <th className="th">Bulunduğu işlem</th>
-              <th className="th">Tedarik</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {order.components.map((c) => {
-              const stage = componentStage(c.id, tasks);
-              return (
-                <tr key={`${c.id}-${c.supplyStatus}-${c.supplier ?? ""}`}>
-                  <td className="td">
-                    <div className="font-medium">{c.name}</div>
-                    <div className="text-xs text-slate-500">{CATEGORY_LABELS[c.category]}</div>
-                  </td>
-                  <td className="td text-slate-600">
-                    {c.spec ?? "—"}
-                    {c.color && <div className="text-xs">Renk: {c.color}</div>}
-                  </td>
-                  <td className="td whitespace-nowrap text-right tabular-nums">
-                    {c.quantity != null ? `${c.quantity.toLocaleString("tr-TR")} ${c.unit ?? ""}` : "—"}
-                  </td>
-                  <td className="td">
-                    <Badge tone={STAGE_TONE[stage.state]}>{stage.label}</Badge>
-                  </td>
-                  <td className="td">
-                    {manage ? (
-                      <ActionForm action={updateComponent} className="flex flex-wrap items-center gap-1">
-                        <input type="hidden" name="componentId" value={c.id} />
-                        <select name="supplyStatus" defaultValue={c.supplyStatus} className="input-sm">
-                          {Object.entries(SUPPLY_STATUS).map(([k, v]) => (
-                            <option key={k} value={k}>{v.label}</option>
-                          ))}
-                        </select>
-                        <input name="supplier" defaultValue={c.supplier ?? ""} placeholder="Tedarikçi" className="input-sm w-28" />
-                        <button className="btn btn-xs">Kaydet</button>
-                      </ActionForm>
-                    ) : (
-                      <Badge tone={SUPPLY_STATUS[c.supplyStatus].tone}>{SUPPLY_STATUS[c.supplyStatus].label}</Badge>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </section>
+      {/* Parçalar: değişiklikler toplu kaydedilir */}
+      <ComponentsEditor
+        orderId={order.id}
+        editable={manage}
+        rows={order.components.map((c) => {
+          const stage = componentStage(c.id, tasks);
+          return {
+            id: c.id,
+            name: c.name,
+            categoryLabel: CATEGORY_LABELS[c.category],
+            spec: c.spec,
+            color: c.color,
+            quantityText: c.quantity != null ? `${c.quantity.toLocaleString("tr-TR")} ${c.unit ?? ""}`.trim() : "",
+            stage: { label: stage.label, tone: STAGE_TONE[stage.state] },
+            supplyStatus: c.supplyStatus,
+            supplier: c.supplier ?? "",
+            orderedAt: toInputDate(c.orderedAt),
+            expectedAt: toInputDate(c.expectedAt),
+            receivedAt: toInputDate(c.receivedAt),
+          };
+        })}
+      />
 
       {/* Görevler */}
       <section className="card overflow-x-auto">

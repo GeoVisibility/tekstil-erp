@@ -1,3 +1,4 @@
+import { today as todayDate } from "@/lib/labels";
 import Link from "next/link";
 import type { Prisma, TaskStatus } from "@prisma/client";
 import { TaskStatusButtons } from "@/components/TaskStatusButtons";
@@ -40,7 +41,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     orderBy: [{ dueDate: "asc" }, { process: { sortOrder: "asc" } }],
   });
 
-  const today = new Date(new Date().toDateString());
+  const today = todayDate();
   const qs = (o: Record<string, string | undefined>) =>
     "?" + new URLSearchParams(Object.entries({ f, mine, ...o }).filter(([, v]) => v) as [string, string][]).toString();
 

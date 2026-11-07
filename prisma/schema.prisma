@@ -173,6 +173,9 @@ model OrderComponent {
   unit         String?
   supplier     String?
   supplyStatus SupplyStatus       @default(PENDING)
+  orderedAt    DateTime?          // Tedarikçiye sipariş verildiği tarih
+  expectedAt   DateTime?          // Beklenen geliş (tedarik termini)
+  receivedAt   DateTime?          // Depoya giriş tarihi
   sortOrder    Int                @default(0)
 
   tasks Task[]

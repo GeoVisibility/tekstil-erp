@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { ComponentCategory, Prisma, SupplyStatus, TaskStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withFormState, type FormState } from "@/lib/form";
+import { parseDateInput, today } from "@/lib/labels";
 import { syncOrderStatus } from "@/lib/progress";
 import { orderScope, taskScope } from "@/lib/scope";
 import { requireRole, requireSession } from "@/lib/session";
@@ -19,7 +20,7 @@ function str(fd: FormData, key: string) {
 }
 function date(fd: FormData, key: string) {
   const v = str(fd, key);
-  return v ? new Date(v + "T00:00:00") : null;
+  return v ? parseDateInput(v) : null;
 }
 
 /** Yönetilebilir siparişi getirir; kapsam dışıysa hata verir. */
@@ -141,7 +142,7 @@ async function createOrderImpl(formData: FormData) {
       quantity: data.quantity,
       color: data.color || null,
       sizeBreakdown: Object.keys(sizeBreakdown).length ? sizeBreakdown : undefined,
-      dueDate: data.dueDate ? new Date(data.dueDate + "T00:00:00") : null,
+      dueDate: data.dueDate ? parseDateInput(data.dueDate) : null,
       notes: data.notes || null,
       createdById: s.uid,
       components: { create: components },
@@ -167,7 +168,7 @@ async function generatePlanImpl(formData: FormData) {
     prisma.orderComponent.findMany({ where: { orderId: order.id }, orderBy: { sortOrder: "asc" } }),
   ]);
 
-  const start = date(formData, "startDate") ?? new Date(new Date().toDateString());
+  const start = date(formData, "startDate") ?? today();
   let cursor = start.getTime();
   const tasks: {
     orderId: string;
@@ -293,23 +294,51 @@ async function deleteTaskImpl(formData: FormData) {
 
 // ─── Parça (malzeme) güncelleme ────────────────────────────────
 
-const SUPPLY: SupplyStatus[] = ["PENDING", "ORDERED", "IN_STOCK"];
+const isoDate = z
+  .string()
+  .regex(/^(\d{4}-\d{2}-\d{2})?$/, "Geçersiz tarih.")
+  .transform((v) => (v ? parseDateInput(v) : null));
 
-async function updateComponentImpl(formData: FormData) {
-  const s = await requireRole("DEVELOPER", "COMPANY");
-  const comp = await prisma.orderComponent.findFirst({
-    where: { id: String(formData.get("componentId")), order: orderScope(s) },
+const componentRowSchema = z.object({
+  id: z.string().min(1),
+  supplyStatus: z.enum(["PENDING", "ORDERED", "IN_STOCK"] satisfies SupplyStatus[], "Geçersiz tedarik durumu."),
+  supplier: z
+    .string()
+    .trim()
+    .max(120, "Tedarikçi adı çok uzun.")
+    .transform((v) => v || null),
+  orderedAt: isoDate,
+  expectedAt: isoDate,
+  receivedAt: isoDate,
+});
+
+export type ComponentRowInput = z.input<typeof componentRowSchema>;
+
+/** Parça tablosundaki tüm değişiklikleri tek seferde kaydeder. */
+export async function saveComponents(orderId: string, rows: ComponentRowInput[]): Promise<FormState> {
+  return withFormState(async () => {
+    const s = await requireRole("DEVELOPER", "COMPANY");
+    const order = await manageableOrder(s, orderId);
+    if (order.status === "CANCELLED") throw new Error("İptal edilmiş sipariş düzenlenemez.");
+
+    const parsed = z.array(componentRowSchema).max(200).parse(rows);
+    if (parsed.length === 0) return;
+
+    // Tüm satırlar bu siparişe ait olmalı
+    const owned = await prisma.orderComponent.count({ where: { orderId: order.id, id: { in: parsed.map((r) => r.id) } } });
+    if (owned !== parsed.length) throw new Error("Bazı parçalar bu siparişe ait değil.");
+
+    for (const r of parsed) {
+      if (r.receivedAt && r.orderedAt && r.receivedAt < r.orderedAt) {
+        throw new Error("Geliş tarihi, sipariş tarihinden önce olamaz.");
+      }
+    }
+
+    await prisma.$transaction(
+      parsed.map(({ id, ...data }) => prisma.orderComponent.update({ where: { id }, data })),
+    );
+    revalidatePath(`/orders/${order.id}`);
   });
-  if (!comp) throw new Error("Parça bulunamadı.");
-  const supplyStatus = String(formData.get("supplyStatus")) as SupplyStatus;
-  await prisma.orderComponent.update({
-    where: { id: comp.id },
-    data: {
-      supplyStatus: SUPPLY.includes(supplyStatus) ? supplyStatus : comp.supplyStatus,
-      supplier: str(formData, "supplier"),
-    },
-  });
-  revalidatePath(`/orders/${comp.orderId}`);
 }
 
 async function cancelOrderImpl(formData: FormData) {
@@ -339,9 +368,6 @@ export async function setTaskStatus(_: FormState, formData: FormData) {
 }
 export async function deleteTask(_: FormState, formData: FormData) {
   return withFormState(() => deleteTaskImpl(formData));
-}
-export async function updateComponent(_: FormState, formData: FormData) {
-  return withFormState(() => updateComponentImpl(formData));
 }
 export async function cancelOrder(_: FormState, formData: FormData) {
   return withFormState(() => cancelOrderImpl(formData));
