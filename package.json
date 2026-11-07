@@ -13,9 +13,10 @@
     "db:up": "docker compose up -d",
     "postinstall": "prisma generate",
     "vercel-build": "prisma generate && prisma migrate deploy && next build",
-    "db:seed:prod": "prisma db seed",
+    "db:seed:prod": "tsx --env-file=.env.production.local prisma/seed.ts",
     "db:deploy": "prisma migrate deploy",
-    "create-admin": "tsx scripts/create-admin.ts"
+    "create-admin": "tsx scripts/create-admin.ts",
+    "create-admin:prod": "tsx --env-file=.env.production.local scripts/create-admin.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
