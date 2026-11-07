@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migration'lar için havuzsuz (direct) bağlantı. Neon'da "-pooler" olmayan adres.
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Kimlik & Yetki ────────────────────────────────────────────
+
+enum Role {
+  DEVELOPER   // Sistem geliştiricisi: her şeyi görür
+  COMPANY     // Ana firma: sipariş açar, görev atar
+  SUBCOMPANY  // Alt firma / fason atölye: kendisine atanan görevleri yürütür
+  CUSTOMER    // Müşteri: kendi siparişlerinin ilerlemesini izler
+}
+
+enum OrgType {
+  COMPANY
+  SUBCOMPANY
+  CUSTOMER
+}
+
+model Organization {
+  id        String       @id @default(cuid())
+  name      String
+  type      OrgType
+  // Alt firma ve müşteriler bir ana firmaya bağlıdır
+  parentId  String?
+  parent    Organization?  @relation("OrgTree", fields: [parentId], references: [id])
+  children  Organization[] @relation("OrgTree")
+  phone     String?
+  email     String?
+  createdAt DateTime     @default(now())
+
+  users          User[]
+  ordersOwned    ProductionOrder[] @relation("OrderCompany")
+  ordersAsClient ProductionOrder[] @relation("OrderCustomer")
+  assignedTasks  Task[]            @relation("TaskAssigneeOrg")
+}
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  name           String
+  passwordHash   String
+  role           Role
+  active         Boolean       @default(true)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime      @default(now())
+
+  assignedTasks Task[]            @relation("TaskAssigneeUser")
+  createdOrders ProductionOrder[] @relation("OrderCreatedBy")
+}
+
+// ─── Ürün tanımları (şablonlar) ────────────────────────────────
+
+enum ComponentCategory {
+  FABRIC      // Kumaş
+  TRIM        // Aksesuar / malzeme (fermuar, kordon, kuşgözü...)
+  PRINT       // Baskı
+  EMBROIDERY  // Nakış
+  LABEL       // Etiket
+  PACKAGING   // Ambalaj
+}
+
+model ProductType {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  components ComponentTemplate[]
+  processes  ProcessTemplate[]
+  orders     ProductionOrder[]
+}
+
+model ComponentTemplate {
+  id            String            @id @default(cuid())
+  productTypeId String
+  productType   ProductType       @relation(fields: [productTypeId], references: [id], onDelete: Cascade)
+  name          String
+  category      ComponentCategory
+  defaultSpec   String?
+  defaultUnit   String?
+  // Sipariş başına adet çarpanı (örn. kordon ucu: 2 adet / ürün)
+  perUnitQty    Float?
+  required      Boolean           @default(true)
+  sortOrder     Int               @default(0)
+
+  orderComponents OrderComponent[]
+}
+
+model ProcessTemplate {
+  id                  String              @id @default(cuid())
+  productTypeId       String
+  productType         ProductType         @relation(fields: [productTypeId], references: [id], onDelete: Cascade)
+  name                String
+  sortOrder           Int                 @default(0)
+  defaultDurationDays Int                 @default(1)
+  // Boşsa ürünün tamamına uygulanır; doluysa yalnızca bu kategorideki parçalara
+  componentCategories ComponentCategory[]
+
+  tasks Task[]
+}
+
+// ─── Üretim ────────────────────────────────────────────────────
+
+enum OrderStatus {
+  DRAFT          // Taslak
+  PLANNING       // Planlama
+  IN_PRODUCTION  // Üretimde
+  COMPLETED      // Tamamlandı
+  CANCELLED      // İptal
+}
+
+enum SupplyStatus {
+  PENDING   // Tedarik bekliyor
+  ORDERED   // Sipariş verildi
+  IN_STOCK  // Depoda
+}
+
+enum TaskStatus {
+  PENDING      // Bekliyor
+  IN_PROGRESS  // Devam ediyor
+  DONE         // Tamamlandı
+  BLOCKED      // Engellendi
+}
+
+model ProductionOrder {
+  id            String      @id @default(cuid())
+  code          String      @unique
+  modelName     String
+  productTypeId String
+  productType   ProductType @relation(fields: [productTypeId], references: [id])
+  companyId     String
+  company       Organization  @relation("OrderCompany", fields: [companyId], references: [id])
+  customerId    String?
+  customer      Organization? @relation("OrderCustomer", fields: [customerId], references: [id])
+  quantity      Int
+  color         String?
+  // Beden dağılımı, örn. {"S":100,"M":200}
+  sizeBreakdown Json?
+  dueDate       DateTime?
+  status        OrderStatus @default(PLANNING)
+  notes         String?
+  createdById   String?
+  createdBy     User?       @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  components OrderComponent[]
+  tasks      Task[]
+}
+
+model OrderComponent {
+  id           String             @id @default(cuid())
+  orderId      String
+  order        ProductionOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  templateId   String?
+  template     ComponentTemplate? @relation(fields: [templateId], references: [id])
+  name         String
+  category     ComponentCategory
+  spec         String?
+  color        String?
+  quantity     Float?
+  unit         String?
+  supplier     String?
+  supplyStatus SupplyStatus       @default(PENDING)
+  sortOrder    Int                @default(0)
+
+  tasks Task[]
+}
+
+model Task {
+  id            String          @id @default(cuid())
+  orderId       String
+  order         ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  processId     String
+  process       ProcessTemplate @relation(fields: [processId], references: [id])
+  // Boşsa görev ürünün tamamı içindir (örn. dikim)
+  componentId   String?
+  component     OrderComponent? @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  assigneeUserId String?
+  assigneeUser   User?          @relation("TaskAssigneeUser", fields: [assigneeUserId], references: [id])
+  assigneeOrgId  String?
+  assigneeOrg    Organization?  @relation("TaskAssigneeOrg", fields: [assigneeOrgId], references: [id])
+  status        TaskStatus      @default(PENDING)
+  startDate     DateTime?
+  dueDate       DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  note          String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([orderId])
+  @@index([assigneeOrgId])
+  @@index([assigneeUserId])
+}
