@@ -9,7 +9,8 @@ export const LINE_STATUS: Record<SalesLineStatus, { label: string; short: string
   RECEIVED: { label: "Alındı", short: "A", tone: "blue" },
   IN_PRODUCTION: { label: "Üretimde", short: "Ü", tone: "amber" },
   SHIPPED: { label: "Yüklendi", short: "Y", tone: "green" },
-  CANCELLED: { label: "İptal", short: "İ", tone: "red" },
+  // Excel'e indirirken Mutlu Bey'in tablosundaki gibi küçük "i" yazılır
+  CANCELLED: { label: "İptal", short: "i", tone: "red" },
 };
 export const LINE_STATUSES = Object.keys(LINE_STATUS) as SalesLineStatus[];
 

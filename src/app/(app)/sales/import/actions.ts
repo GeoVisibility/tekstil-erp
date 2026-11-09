@@ -21,12 +21,15 @@ export type ImportPreview = {
 
 const normName = (v: string) => v.trim().replace(/\s+/g, " ").toLocaleUpperCase("tr-TR");
 
-/** Excel kodu için tahmini durum (kullanıcı ekranda değiştirebilir). */
+/**
+ * Mutlu Bey'in Excel'indeki S sütunu: Y = Yüklendi, Ü = Üretimde, i = İptal (küçük/büyük harf fark etmez).
+ * Kullanıcı aktarım ekranında yine de değiştirebilir.
+ */
 function suggestStatus(code: string): SalesLineStatus {
   const c = code.trim().toLocaleUpperCase("tr-TR");
   if (c === "Y") return "SHIPPED";
   if (c === "Ü" || c === "U") return "IN_PRODUCTION";
-  if (c === "İ" || c === "I") return "RECEIVED";
+  if (c === "İ" || c === "I") return "CANCELLED";
   return "RECEIVED";
 }
 
