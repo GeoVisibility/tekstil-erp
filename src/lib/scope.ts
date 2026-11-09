@@ -39,3 +39,10 @@ export function orgScope(s: SessionPayload): Prisma.OrganizationWhereInput {
   if (s.role === "COMPANY" && s.orgId) return { OR: [{ id: s.orgId }, { parentId: s.orgId }] };
   return NONE;
 }
+
+/** Kullanıcının görebileceği satış siparişleri (sipariş listesi). */
+export function salesScope(s: SessionPayload): Prisma.SalesOrderWhereInput {
+  if (s.role === "DEVELOPER") return {};
+  if (s.role === "COMPANY" && s.orgId) return { companyId: s.orgId };
+  return NONE;
+}

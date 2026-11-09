@@ -10,9 +10,10 @@ import { createUser, toggleUserActive } from "../actions";
 
 export default async function UsersPage() {
   const s = await requireRole("DEVELOPER", "COMPANY");
-  const orgs = await prisma.organization.findMany({ where: orgScope(s), orderBy: [{ type: "asc" }, { name: "asc" }] });
+  const allOrgs = await prisma.organization.findMany({ where: orgScope(s), orderBy: [{ type: "asc" }, { name: "asc" }] });
+  const orgs = allOrgs.filter((o) => o.active); // yeni kullanıcı yalnızca aktif kayda bağlanabilir
   const users = await prisma.user.findMany({
-    where: s.role === "DEVELOPER" ? {} : { organizationId: { in: orgs.map((o) => o.id) } },
+    where: s.role === "DEVELOPER" ? {} : { organizationId: { in: allOrgs.map((o) => o.id) } },
     include: { organization: { select: { name: true } } },
     orderBy: [{ role: "asc" }, { name: "asc" }],
   });
@@ -35,7 +36,7 @@ export default async function UsersPage() {
               {users.map((u) => (
                 <tr key={u.id} className={u.active ? "" : "opacity-50"}>
                   <td className="td">
-                    <div className="font-medium">{u.name}</div>
+                    <Link href={`/admin/users/${u.id}`} className="font-medium text-indigo-700 hover:underline">{u.name}</Link>
                     <div className="text-xs text-slate-500">{u.email}</div>
                   </td>
                   <td className="td"><Badge tone={u.role === "DEVELOPER" ? "red" : "blue"}>{ROLE_LABELS[u.role]}</Badge></td>

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ActionForm } from "@/components/ActionForm";
 import { Badge, PageHeader } from "@/components/ui";
 import { prisma } from "@/lib/db";
@@ -31,9 +32,9 @@ export default async function OrganizationsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {orgs.map((o) => (
-                <tr key={o.id}>
+                <tr key={o.id} className={o.active ? "" : "opacity-50"}>
                   <td className="td font-medium">
-                    {o.name}
+                    <Link href={`/admin/organizations/${o.id}`} className="text-indigo-700 hover:underline">{o.name}</Link>{!o.active && <span className="ml-2"><Badge tone="red">Pasif</Badge></span>}
                     {(o.phone || o.email) && <div className="text-xs font-normal text-slate-500">{[o.phone, o.email].filter(Boolean).join(" · ")}</div>}
                   </td>
                   <td className="td">

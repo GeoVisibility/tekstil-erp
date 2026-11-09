@@ -57,13 +57,13 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
   const [assignableOrgs, assignableUsers] = manage
     ? await Promise.all([
         prisma.organization.findMany({
-          where: { parentId: order.companyId, type: "SUBCOMPANY" },
+          where: { parentId: order.companyId, type: "SUBCOMPANY", active: true },
           orderBy: { name: "asc" },
         }),
         prisma.user.findMany({
           where: {
             active: true,
-            organization: { OR: [{ id: order.companyId }, { parentId: order.companyId, type: "SUBCOMPANY" }] },
+            organization: { active: true, OR: [{ id: order.companyId }, { parentId: order.companyId, type: "SUBCOMPANY" }] },
           },
           include: { organization: { select: { name: true } } },
           orderBy: { name: "asc" },

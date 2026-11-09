@@ -15,6 +15,7 @@ export type NavItem = { href: string; label: string; roles: Role[] };
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Genel Bakış", roles: ["DEVELOPER", "COMPANY", "SUBCOMPANY", "CUSTOMER"] },
+  { href: "/sales", label: "Sipariş Listesi", roles: ["DEVELOPER", "COMPANY"] },
   { href: "/orders", label: "Üretim Siparişleri", roles: ["DEVELOPER", "COMPANY", "CUSTOMER"] },
   { href: "/tasks", label: "Görevlerim", roles: ["DEVELOPER", "COMPANY", "SUBCOMPANY"] },
   { href: "/products", label: "Ürün Tanımları", roles: ["DEVELOPER", "COMPANY"] },

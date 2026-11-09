@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   url       = env("DATABASE_URL")
   // Migration'lar için havuzsuz (direct) bağlantı. Neon'da "-pooler" olmayan adres.
   directUrl = env("DIRECT_URL")
@@ -12,10 +12,10 @@ datasource db {
 // ─── Kimlik & Yetki ────────────────────────────────────────────
 
 enum Role {
-  DEVELOPER   // Sistem geliştiricisi: her şeyi görür
-  COMPANY     // Ana firma: sipariş açar, görev atar
-  SUBCOMPANY  // Alt firma / fason atölye: kendisine atanan görevleri yürütür
-  CUSTOMER    // Müşteri: kendi siparişlerinin ilerlemesini izler
+  DEVELOPER // Sistem geliştiricisi: her şeyi görür
+  COMPANY // Ana firma: sipariş açar, görev atar
+  SUBCOMPANY // Alt firma / fason atölye: kendisine atanan görevleri yürütür
+  CUSTOMER // Müşteri: kendi siparişlerinin ilerlemesini izler
 }
 
 enum OrgType {
@@ -25,7 +25,7 @@ enum OrgType {
 }
 
 model Organization {
-  id        String       @id @default(cuid())
+  id        String         @id @default(cuid())
   name      String
   type      OrgType
   // Alt firma ve müşteriler bir ana firmaya bağlıdır
@@ -34,12 +34,15 @@ model Organization {
   children  Organization[] @relation("OrgTree")
   phone     String?
   email     String?
-  createdAt DateTime     @default(now())
+  active    Boolean        @default(true)
+  createdAt DateTime       @default(now())
 
   users          User[]
   ordersOwned    ProductionOrder[] @relation("OrderCompany")
   ordersAsClient ProductionOrder[] @relation("OrderCustomer")
   assignedTasks  Task[]            @relation("TaskAssigneeOrg")
+  salesOwned     SalesOrder[]      @relation("SalesCompany")
+  salesAsClient  SalesOrder[]      @relation("SalesCustomer")
 }
 
 model User {
@@ -55,17 +58,18 @@ model User {
 
   assignedTasks Task[]            @relation("TaskAssigneeUser")
   createdOrders ProductionOrder[] @relation("OrderCreatedBy")
+  createdSales  SalesOrder[]      @relation("SalesCreatedBy")
 }
 
 // ─── Ürün tanımları (şablonlar) ────────────────────────────────
 
 enum ComponentCategory {
-  FABRIC      // Kumaş
-  TRIM        // Aksesuar / malzeme (fermuar, kordon, kuşgözü...)
-  PRINT       // Baskı
-  EMBROIDERY  // Nakış
-  LABEL       // Etiket
-  PACKAGING   // Ambalaj
+  FABRIC // Kumaş
+  TRIM // Aksesuar / malzeme (fermuar, kordon, kuşgözü...)
+  PRINT // Baskı
+  EMBROIDERY // Nakış
+  LABEL // Etiket
+  PACKAGING // Ambalaj
 }
 
 model ProductType {
@@ -113,32 +117,32 @@ model ProcessTemplate {
 // ─── Üretim ────────────────────────────────────────────────────
 
 enum OrderStatus {
-  DRAFT          // Taslak
-  PLANNING       // Planlama
-  IN_PRODUCTION  // Üretimde
-  COMPLETED      // Tamamlandı
-  CANCELLED      // İptal
+  DRAFT // Taslak
+  PLANNING // Planlama
+  IN_PRODUCTION // Üretimde
+  COMPLETED // Tamamlandı
+  CANCELLED // İptal
 }
 
 enum SupplyStatus {
-  PENDING   // Tedarik bekliyor
-  ORDERED   // Sipariş verildi
-  IN_STOCK  // Depoda
+  PENDING // Tedarik bekliyor
+  ORDERED // Sipariş verildi
+  IN_STOCK // Depoda
 }
 
 enum TaskStatus {
-  PENDING      // Bekliyor
-  IN_PROGRESS  // Devam ediyor
-  DONE         // Tamamlandı
-  BLOCKED      // Engellendi
+  PENDING // Bekliyor
+  IN_PROGRESS // Devam ediyor
+  DONE // Tamamlandı
+  BLOCKED // Engellendi
 }
 
 model ProductionOrder {
-  id            String      @id @default(cuid())
-  code          String      @unique
+  id            String        @id @default(cuid())
+  code          String        @unique
   modelName     String
   productTypeId String
-  productType   ProductType @relation(fields: [productTypeId], references: [id])
+  productType   ProductType   @relation(fields: [productTypeId], references: [id])
   companyId     String
   company       Organization  @relation("OrderCompany", fields: [companyId], references: [id])
   customerId    String?
@@ -148,15 +152,16 @@ model ProductionOrder {
   // Beden dağılımı, örn. {"S":100,"M":200}
   sizeBreakdown Json?
   dueDate       DateTime?
-  status        OrderStatus @default(PLANNING)
+  status        OrderStatus   @default(PLANNING)
   notes         String?
   createdById   String?
-  createdBy     User?       @relation("OrderCreatedBy", fields: [createdById], references: [id])
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdBy     User?         @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   components OrderComponent[]
   tasks      Task[]
+  salesLine  SalesOrderLine?
 }
 
 model OrderComponent {
@@ -173,37 +178,141 @@ model OrderComponent {
   unit         String?
   supplier     String?
   supplyStatus SupplyStatus       @default(PENDING)
-  orderedAt    DateTime?          // Tedarikçiye sipariş verildiği tarih
-  expectedAt   DateTime?          // Beklenen geliş (tedarik termini)
-  receivedAt   DateTime?          // Depoya giriş tarihi
+  orderedAt    DateTime? // Tedarikçiye sipariş verildiği tarih
+  expectedAt   DateTime? // Beklenen geliş (tedarik termini)
+  receivedAt   DateTime? // Depoya giriş tarihi
   sortOrder    Int                @default(0)
 
   tasks Task[]
 }
 
 model Task {
-  id            String          @id @default(cuid())
-  orderId       String
-  order         ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  processId     String
-  process       ProcessTemplate @relation(fields: [processId], references: [id])
+  id             String          @id @default(cuid())
+  orderId        String
+  order          ProductionOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  processId      String
+  process        ProcessTemplate @relation(fields: [processId], references: [id])
   // Boşsa görev ürünün tamamı içindir (örn. dikim)
-  componentId   String?
-  component     OrderComponent? @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  componentId    String?
+  component      OrderComponent? @relation(fields: [componentId], references: [id], onDelete: Cascade)
   assigneeUserId String?
-  assigneeUser   User?          @relation("TaskAssigneeUser", fields: [assigneeUserId], references: [id])
+  assigneeUser   User?           @relation("TaskAssigneeUser", fields: [assigneeUserId], references: [id])
   assigneeOrgId  String?
-  assigneeOrg    Organization?  @relation("TaskAssigneeOrg", fields: [assigneeOrgId], references: [id])
-  status        TaskStatus      @default(PENDING)
-  startDate     DateTime?
-  dueDate       DateTime?
-  startedAt     DateTime?
-  completedAt   DateTime?
-  note          String?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  assigneeOrg    Organization?   @relation("TaskAssigneeOrg", fields: [assigneeOrgId], references: [id])
+  status         TaskStatus      @default(PENDING)
+  startDate      DateTime?
+  dueDate        DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  note           String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@index([orderId])
   @@index([assigneeOrgId])
   @@index([assigneeUserId])
+}
+
+// ─── Satış / Sipariş listesi ───────────────────────────────────
+// Müşteri siparişi (MHS kodu) → satırlar (model + renk) → sevkiyatlar.
+// Tahsilatlar sipariş bazında tutulur. Bir satır üretim takibine (ProductionOrder) açılabilir.
+
+enum SalesLineStatus {
+  RECEIVED // Alındı
+  IN_PRODUCTION // Üretimde
+  SHIPPED // Yüklendi
+  CANCELLED // İptal
+}
+
+enum Currency {
+  EUR
+  USD
+  GBP
+  TRY
+}
+
+/// Beden seti (Excel'deki GRADE: A, B, C...). En fazla 10 beden.
+model SizeSet {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String?
+  sizes     String[]
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+
+  lines SalesOrderLine[]
+}
+
+model SalesOrder {
+  id              String       @id @default(cuid())
+  code            String // Sipariş kodu (örn. MHS001)
+  companyId       String
+  company         Organization @relation("SalesCompany", fields: [companyId], references: [id])
+  customerId      String
+  customer        Organization @relation("SalesCustomer", fields: [customerId], references: [id])
+  customerOrderNo String? // Müşterinin sipariş no (Excel: ORDER)
+  orderDate       DateTime
+  currency        Currency     @default(EUR)
+  notes           String?
+  createdById     String?
+  createdBy       User?        @relation("SalesCreatedBy", fields: [createdById], references: [id])
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  lines    SalesOrderLine[]
+  payments Payment[]
+
+  @@unique([companyId, code])
+  @@index([customerId])
+}
+
+model SalesOrderLine {
+  id                String           @id @default(cuid())
+  salesOrderId      String
+  salesOrder        SalesOrder       @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  sortOrder         Int              @default(0)
+  model             String
+  color             String?
+  fabric            String?
+  sizeSetId         String?
+  sizeSet           SizeSet?         @relation(fields: [sizeSetId], references: [id])
+  /// Beden setindeki sıraya göre adetler (en fazla 10)
+  quantities        Int[]
+  deliveryDate      DateTime?
+  unitPrice         Decimal?         @db.Decimal(12, 4)
+  status            SalesLineStatus  @default(RECEIVED)
+  notes             String?
+  productionOrderId String?          @unique
+  productionOrder   ProductionOrder? @relation(fields: [productionOrderId], references: [id], onDelete: SetNull)
+
+  shipments Shipment[]
+
+  @@index([salesOrderId])
+}
+
+model Shipment {
+  id        String         @id @default(cuid())
+  lineId    String
+  line      SalesOrderLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  date      DateTime
+  quantity  Int
+  note      String?
+  createdAt DateTime       @default(now())
+
+  @@index([lineId])
+}
+
+model Payment {
+  id           String     @id @default(cuid())
+  salesOrderId String
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  date         DateTime
+  amount       Decimal    @db.Decimal(14, 2)
+  currency     Currency
+  /// 1 birim dövizin TL karşılığı (TRY için 1)
+  rate         Decimal?   @db.Decimal(12, 4)
+  note         String?
+  createdAt    DateTime   @default(now())
+
+  @@index([salesOrderId])
 }

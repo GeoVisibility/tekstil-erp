@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { SupplyStatus } from "@prisma/client";
 import { saveComponents, type ComponentRowInput } from "@/app/(app)/orders/actions";
 import { SUPPLY_STATUS, type Tone } from "@/lib/labels";
+import { useUnsavedWarning } from "@/lib/useUnsavedWarning";
 import { Badge } from "./ui";
 
 export type ComponentRow = {
@@ -23,7 +24,6 @@ export type ComponentRow = {
 
 type Draft = Pick<ComponentRow, "supplyStatus" | "supplier" | "orderedAt" | "expectedAt" | "receivedAt">;
 const FIELDS: (keyof Draft)[] = ["supplyStatus", "supplier", "orderedAt", "expectedAt", "receivedAt"];
-const UNSAVED_MSG = "Kaydedilmemiş değişiklikler var. Sayfadan çıkarsanız kaybolacak. Devam edilsin mi?";
 
 const pick = (r: ComponentRow): Draft => ({
   supplyStatus: r.supplyStatus,
@@ -62,30 +62,7 @@ export function ComponentsEditor({ orderId, rows, editable }: { orderId: string;
   const changedIds = rows.filter((r) => FIELDS.some((f) => drafts[r.id][f] !== initial[r.id][f])).map((r) => r.id);
   const dirty = changedIds.length > 0;
 
-  // ── Kaydedilmeden çıkış uyarısı: sekme kapatma / yenileme + uygulama içi linkler
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    const onClick = (e: MouseEvent) => {
-      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
-      if (!a || a.target === "_blank" || e.defaultPrevented || e.metaKey || e.ctrlKey) return;
-      const url = new URL(a.href, location.href);
-      if (url.origin === location.origin && url.pathname === location.pathname && url.search === location.search) return;
-      if (!confirm(UNSAVED_MSG)) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("click", onClick, true);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("click", onClick, true);
-    };
-  }, [dirty]);
+  useUnsavedWarning(dirty);
 
   useEffect(() => {
     if (!message) return;

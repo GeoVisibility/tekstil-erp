@@ -46,7 +46,7 @@ export default async function NewOrderPage({ searchParams }: { searchParams: Pro
   if (!product) notFound();
 
   const customers = await prisma.organization.findMany({
-    where: { type: "CUSTOMER", ...(s.role === "COMPANY" ? { parentId: s.orgId ?? "__none__" } : {}) },
+    where: { type: "CUSTOMER", active: true, ...(s.role === "COMPANY" ? { parentId: s.orgId ?? "__none__" } : {}) },
     orderBy: { name: "asc" },
   });
   const companies =

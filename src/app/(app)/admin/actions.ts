@@ -2,11 +2,13 @@
 
 import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { OrgType, Role } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { withFormState, type FormState } from "@/lib/form";
 import { requireRole } from "@/lib/session";
+import { orgUsage, userUsage } from "@/lib/usage";
 
 const orgSchema = z.object({
   name: z.string().trim().min(2, "Ad en az 2 karakter olmalı."),
@@ -102,7 +104,176 @@ async function toggleUserActiveImpl(formData: FormData) {
   revalidatePath("/admin/users");
 }
 
+// ─── Organizasyon düzenleme / silme ────────────────────────────
+
+/** Oturumun yönetebileceği organizasyonu getirir (firma: kendisi + bağlıları). */
+async function manageableOrg(s: Awaited<ReturnType<typeof requireRole>>, id: string) {
+  const org = await prisma.organization.findFirst({
+    where: {
+      id,
+      ...(s.role === "COMPANY" ? { OR: [{ id: s.orgId ?? "__none__" }, { parentId: s.orgId ?? "__none__" }] } : {}),
+    },
+  });
+  if (!org) throw new Error("Organizasyon bulunamadı.");
+  return org;
+}
+
+
+const orgUpdateSchema = orgSchema.extend({ id: z.string().min(1) });
+
+async function updateOrganizationImpl(formData: FormData) {
+  const s = await requireRole("DEVELOPER", "COMPANY");
+  const d = orgUpdateSchema.parse(Object.fromEntries(formData));
+  const org = await manageableOrg(s, d.id);
+
+  let type: OrgType = org.type;
+  let parentId = org.parentId;
+
+  if (s.role === "COMPANY") {
+    // Firma kendi tipini değiştiremez; bağlılarını alt firma ↔ müşteri arasında değiştirebilir
+    if (org.id !== s.orgId) {
+      if (d.type === "COMPANY") throw new Error("Bağlı kayıt Firma tipine çevrilemez.");
+      type = d.type;
+    }
+  } else {
+    type = d.type;
+    if (type === "COMPANY") parentId = null;
+    else {
+      const parent = d.parentId ? await prisma.organization.findFirst({ where: { id: d.parentId, type: "COMPANY" } }) : null;
+      if (!parent) throw new Error("Alt firma ve müşteriler bir firmaya bağlı olmalı.");
+      if (parent.id === org.id) throw new Error("Kayıt kendisine bağlanamaz.");
+      parentId = parent.id;
+    }
+    if (org.type === "COMPANY" && type !== "COMPANY") {
+      const children = await prisma.organization.count({ where: { parentId: org.id } });
+      if (children) throw new Error("Bağlı kayıtları olan firmanın tipi değiştirilemez.");
+    }
+  }
+
+  await prisma.$transaction([
+    prisma.organization.update({
+      where: { id: org.id },
+      data: { name: d.name, type, parentId, phone: d.phone || null, email: d.email || null },
+    }),
+    // Tip değiştiyse kullanıcıların rolü de yeni tipe uyar
+    ...(type !== org.type
+      ? [prisma.user.updateMany({ where: { organizationId: org.id, role: { not: "DEVELOPER" } }, data: { role: ROLE_FOR_ORG[type] } })]
+      : []),
+  ]);
+  revalidatePath("/admin/organizations");
+  revalidatePath(`/admin/organizations/${org.id}`);
+}
+
+async function toggleOrgActiveImpl(formData: FormData) {
+  const s = await requireRole("DEVELOPER", "COMPANY");
+  const org = await manageableOrg(s, String(formData.get("id")));
+  if (org.id === s.orgId) throw new Error("Kendi firmanızı pasif yapamazsınız.");
+  await prisma.organization.update({ where: { id: org.id }, data: { active: !org.active } });
+  revalidatePath("/admin/organizations");
+  revalidatePath(`/admin/organizations/${org.id}`);
+}
+
+async function deleteOrganizationImpl(formData: FormData) {
+  const s = await requireRole("DEVELOPER", "COMPANY");
+  const org = await manageableOrg(s, String(formData.get("id")));
+  if (org.id === s.orgId) throw new Error("Kendi firmanızı silemezsiniz.");
+  const usage = await orgUsage(org.id);
+  if (usage.length) {
+    throw new Error(`Silinemez: ${usage.join(", ")} bağlı. Bunun yerine pasif yapabilirsiniz.`);
+  }
+  await prisma.organization.delete({ where: { id: org.id } });
+  revalidatePath("/admin/organizations");
+  redirect("/admin/organizations");
+}
+
+// ─── Kullanıcı düzenleme / silme ───────────────────────────────
+
+async function manageableUser(s: Awaited<ReturnType<typeof requireRole>>, id: string) {
+  const user = await prisma.user.findFirst({
+    where: {
+      id,
+      ...(s.role === "COMPANY"
+        ? { organization: { OR: [{ id: s.orgId ?? "__none__" }, { parentId: s.orgId ?? "__none__" }] } }
+        : {}),
+    },
+  });
+  if (!user) throw new Error("Kullanıcı bulunamadı.");
+  return user;
+}
+
+
+const userUpdateSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(2, "Ad soyad en az 2 karakter olmalı."),
+  email: z.string().trim().toLowerCase().email("Geçerli bir e-posta girin."),
+  organizationId: z.string().optional(),
+  password: z
+    .string()
+    .optional()
+    .refine((v) => !v || v.length >= 8, "Yeni şifre en az 8 karakter olmalı."),
+});
+
+async function updateUserImpl(formData: FormData) {
+  const s = await requireRole("DEVELOPER", "COMPANY");
+  const d = userUpdateSchema.parse(Object.fromEntries(formData));
+  const user = await manageableUser(s, d.id);
+
+  const dup = await prisma.user.findFirst({ where: { email: d.email, id: { not: user.id } } });
+  if (dup) throw new Error("Bu e-posta başka bir kullanıcıda kayıtlı.");
+
+  let role = user.role;
+  let organizationId = user.organizationId;
+  if (user.role !== "DEVELOPER" && d.organizationId && d.organizationId !== user.organizationId) {
+    if (user.id === s.uid) throw new Error("Kendi organizasyonunuzu değiştiremezsiniz.");
+    const org = await manageableOrg(s, d.organizationId);
+    organizationId = org.id;
+    role = ROLE_FOR_ORG[org.type];
+  }
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      name: d.name,
+      email: d.email,
+      organizationId,
+      role,
+      ...(d.password ? { passwordHash: await bcrypt.hash(d.password, 10) } : {}),
+    },
+  });
+  revalidatePath("/admin/users");
+  revalidatePath(`/admin/users/${user.id}`);
+}
+
+async function deleteUserImpl(formData: FormData) {
+  const s = await requireRole("DEVELOPER", "COMPANY");
+  const user = await manageableUser(s, String(formData.get("id")));
+  if (user.id === s.uid) throw new Error("Kendi hesabınızı silemezsiniz.");
+  const usage = await userUsage(user.id);
+  if (usage.length) {
+    throw new Error(`Silinemez: ${usage.join(", ")} bu kullanıcıya bağlı. Bunun yerine pasif yapabilirsiniz.`);
+  }
+  await prisma.user.delete({ where: { id: user.id } });
+  revalidatePath("/admin/users");
+  redirect("/admin/users");
+}
+
 // ─── Form'lara açılan action'lar (hatalar sayfayı çökertmez, uyarı olarak döner) ───
+
+export async function updateOrganization(_: FormState, formData: FormData) {
+  return withFormState(() => updateOrganizationImpl(formData));
+}
+export async function toggleOrgActive(_: FormState, formData: FormData) {
+  return withFormState(() => toggleOrgActiveImpl(formData));
+}
+export async function deleteOrganization(_: FormState, formData: FormData) {
+  return withFormState(() => deleteOrganizationImpl(formData));
+}
+export async function updateUser(_: FormState, formData: FormData) {
+  return withFormState(() => updateUserImpl(formData));
+}
+export async function deleteUser(_: FormState, formData: FormData) {
+  return withFormState(() => deleteUserImpl(formData));
+}
 
 export async function createOrganization(_: FormState, formData: FormData) {
   return withFormState(() => createOrganizationImpl(formData));

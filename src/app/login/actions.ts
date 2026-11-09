@@ -18,8 +18,8 @@ export async function login(_: LoginState, formData: FormData): Promise<LoginSta
   const parsed = schema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: "E-posta ve şifre gerekli." };
 
-  const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-  const ok = user && user.active && (await bcrypt.compare(parsed.data.password, user.passwordHash));
+  const user = await prisma.user.findUnique({ where: { email: parsed.data.email }, include: { organization: { select: { active: true } } } });
+  const ok = user && user.active && (user.organization?.active ?? true) && (await bcrypt.compare(parsed.data.password, user.passwordHash));
   if (!ok) return { error: "E-posta veya şifre hatalı." };
 
   await createSession({ uid: user.id, name: user.name, role: user.role, orgId: user.organizationId });
