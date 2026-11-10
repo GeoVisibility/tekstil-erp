@@ -180,7 +180,7 @@ export default async function SalesOrderPage({ params }: { params: Promise<{ id:
           unitPrice: l.unitPrice != null ? String(Number(l.unitPrice)) : "",
           status: l.status,
           notes: l.notes ?? "",
-          locked: l.shipments.length > 0 || !!l.productionOrderId,
+          locked: l.shipments.length > 0 || !!l.productionOrder?.tasks.some((t) => t.status !== "PENDING"),
         }))}
       />
 
@@ -189,7 +189,7 @@ export default async function SalesOrderPage({ params }: { params: Promise<{ id:
         <section className="card">
           <div className="card-pad pb-3">
             <h2 className="font-semibold">Sevkiyat</h2>
-            <p className="text-sm text-slate-500">Kısmi yüklemeler tarihleriyle girilir. Tamamı yüklenen satır otomatik &quot;Yüklendi&quot; olur.</p>
+            <p className="text-sm text-slate-500">Yüklemeler tarihleriyle girilir. &quot;Yüklendi&quot; işaretliyse adet eksik olsa da satır kapanır; değilse tamamı yüklenince otomatik kapanır.</p>
           </div>
           <div className="divide-y divide-slate-100 border-t border-slate-200">
             {lines.filter((l) => l.status !== "CANCELLED").map((l) => {
@@ -221,12 +221,15 @@ export default async function SalesOrderPage({ params }: { params: Promise<{ id:
                       ))}
                     </ul>
                   )}
-                  {rest > 0 && (
+                  {(l.status === "RECEIVED" || l.status === "IN_PRODUCTION") && (
                     <ActionForm key={`${l.id}-${l.shipments.length}`} action={addShipment} className="mt-2 flex flex-wrap items-center gap-1">
                       <input type="hidden" name="lineId" value={l.id} />
                       <input type="date" name="date" defaultValue={todayStr} className="input-sm" required />
-                      <input name="quantity" type="number" min={1} defaultValue={rest} className="input-sm w-20" required title="Adet" />
+                      <input name="quantity" type="number" min={1} defaultValue={rest > 0 ? rest : undefined} className="input-sm w-20" required title="Adet" />
                       <input name="note" placeholder="Not (opsiyonel)" className="input-sm w-40" />
+                      <label className="flex items-center gap-1 text-xs text-slate-600">
+                        <input type="checkbox" name="markShipped" defaultChecked={rest > 0} /> Yüklendi
+                      </label>
                       <button className="btn btn-xs">+ Sevkiyat ekle</button>
                     </ActionForm>
                   )}
@@ -241,7 +244,7 @@ export default async function SalesOrderPage({ params }: { params: Promise<{ id:
           <section className="card">
             <div className="card-pad pb-3">
               <h2 className="font-semibold">Üretim takibi</h2>
-              <p className="text-sm text-slate-500">Satırı üretime açınca parça, görev ve aşama takibi başlar.</p>
+              <p className="text-sm text-slate-500">Her satır için görevler otomatik açılır; görev detayından atama ve tarih değiştirilebilir.</p>
             </div>
             <div className="divide-y divide-slate-100 border-t border-slate-200">
               {lines.filter((l) => l.status !== "CANCELLED").map((l) => (

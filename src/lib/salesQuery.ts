@@ -2,7 +2,7 @@ import "server-only";
 import type { Currency, Prisma, SalesLineStatus } from "@prisma/client";
 import { prisma } from "./db";
 import type { SessionPayload } from "./jwt";
-import { parseDateInput } from "./labels";
+import { parseDateInput, today } from "./labels";
 import { addTo, lineTotals, LINE_STATUSES } from "./sales";
 import { salesScope } from "./scope";
 
@@ -24,6 +24,11 @@ export async function querySalesLines(s: SessionPayload, f: SalesFilters) {
   const statusWhere: Prisma.SalesOrderLineWhereInput =
     f.status === "open"
       ? { status: { in: ["RECEIVED", "IN_PRODUCTION"] } }
+      : f.status === "late"
+        ? {
+            status: { in: ["RECEIVED", "IN_PRODUCTION"] },
+            productionOrder: { tasks: { some: { status: { not: "DONE" }, dueDate: { lt: today() } } } },
+          }
       : LINE_STATUSES.includes(f.status as SalesLineStatus)
         ? { status: f.status as SalesLineStatus }
         : {};
@@ -57,7 +62,19 @@ export async function querySalesLines(s: SessionPayload, f: SalesFilters) {
         },
       },
       productionOrder: {
-        select: { id: true, code: true, status: true, tasks: { select: { status: true } } },
+        select: {
+          id: true,
+          code: true,
+          status: true,
+          tasks: {
+            select: {
+              status: true,
+              dueDate: true,
+              completedAt: true,
+              process: { select: { id: true, name: true, sortOrder: true } },
+            },
+          },
+        },
       },
     },
     orderBy: [{ salesOrder: { orderDate: "desc" } }, { salesOrder: { code: "desc" } }, { sortOrder: "asc" }],

@@ -5,6 +5,7 @@ import { SalesLineStatus } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { parseDateInput, today } from "@/lib/labels";
 import { parseOrderWorkbook, type ImportRow } from "@/lib/salesImport";
+import { openProductionForLines } from "@/lib/salesProduction";
 import { requireRole } from "@/lib/session";
 
 export type ImportPreview = {
@@ -104,7 +105,7 @@ export type CommitInput = {
   importPayments: boolean;
 };
 
-export type CommitResult = { error?: string; created?: number; lines?: number; skipped?: string[]; newCustomers?: number; payments?: number };
+export type CommitResult = { error?: string; created?: number; lines?: number; skipped?: string[]; newCustomers?: number; payments?: number; tasksOpened?: number };
 
 /** 2. adım: onaylanan eşleştirmelerle siparişleri oluşturur. Var olan sipariş kodları atlanır. */
 export async function commitImport(input: CommitInput): Promise<CommitResult> {
@@ -152,6 +153,7 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
     let created = 0;
     let lineCount = 0;
     let paymentCount = 0;
+    const openLines: string[] = [];
     const fallbackDate = today();
 
     for (const [code, group] of groups) {
@@ -166,7 +168,8 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
       const received = group.reduce((a, r) => a + (r.received ?? 0), 0);
       const rate = group.find((r) => r.rate != null)?.rate ?? null;
 
-      await prisma.salesOrder.create({
+      const so = await prisma.salesOrder.create({
+        include: { lines: { select: { id: true, status: true }, orderBy: { sortOrder: "asc" } } },
         data: {
           code,
           companyId,
@@ -216,11 +219,17 @@ export async function commitImport(input: CommitInput): Promise<CommitResult> {
       created++;
       lineCount += group.length;
       if (input.importPayments && received > 0) paymentCount++;
+      openLines.push(...so.lines.filter((l) => l.status === "RECEIVED" || l.status === "IN_PRODUCTION").map((l) => l.id));
     }
 
+    // Açık satırlara standart görevler açılır (yüklenmiş / iptal satırlara açılmaz)
+    const tasksOpened = await openProductionForLines(openLines, s.uid);
+
     revalidatePath("/sales");
+    revalidatePath("/orders");
+    revalidatePath("/tasks");
     revalidatePath("/admin/organizations");
-    return { created, lines: lineCount, skipped, newCustomers, payments: paymentCount };
+    return { created, lines: lineCount, skipped, newCustomers, payments: paymentCount, tasksOpened };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Aktarım sırasında hata oluştu." };
   }

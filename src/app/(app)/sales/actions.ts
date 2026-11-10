@@ -4,12 +4,19 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { Currency, SalesLineStatus } from "@prisma/client";
-import { nextOrderCode } from "@/lib/codes";
 import { prisma } from "@/lib/db";
 import { withFormState, type FormState } from "@/lib/form";
 import type { SessionPayload } from "@/lib/jwt";
 import { parseDateInput } from "@/lib/labels";
 import { SIZE_SLOTS, sumQty } from "@/lib/sales";
+import {
+  createTasksForLinkedLine,
+  LINES_WITHOUT_TASKS,
+  openProductionForLine,
+  openProductionForLines,
+  rescheduleLine,
+  startedProductionIds,
+} from "@/lib/salesProduction";
 import { salesScope } from "@/lib/scope";
 import { requireRole } from "@/lib/session";
 
@@ -124,8 +131,13 @@ export async function createSalesOrder(header: SalesHeaderInput, lines: SalesLin
         createdById: s.uid,
         lines: { create: ls.map((l, i) => lineData(l, i)) },
       },
+      include: { lines: { select: { id: true }, orderBy: { sortOrder: "asc" } } },
     });
     id = order.id;
+    // Her satır için görevler otomatik açılır
+    await openProductionForLines(order.lines.map((l) => l.id), s.uid);
+    revalidatePath("/orders");
+    revalidatePath("/tasks");
     revalidatePath("/sales");
   });
   if (res.error) return res;
@@ -168,25 +180,46 @@ export async function saveSalesLines(orderId: string, lines: SalesLineInput[]): 
 
     const existing = await prisma.salesOrderLine.findMany({
       where: { salesOrderId: order.id },
-      select: { id: true, model: true, productionOrderId: true, _count: { select: { shipments: true } } },
+      select: { id: true, model: true, deliveryDate: true, productionOrderId: true, _count: { select: { shipments: true } } },
     });
     const keep = new Set(ls.map((l) => l.id).filter(Boolean));
     for (const l of ls) if (l.id && !existing.some((e) => e.id === l.id)) throw new Error("Geçersiz satır.");
     const removed = existing.filter((e) => !keep.has(e.id));
-    const blocked = removed.find((e) => e._count.shipments > 0 || e.productionOrderId);
+    const removedPOs = removed.map((r) => r.productionOrderId).filter((x): x is string => !!x);
+    const started = await startedProductionIds(removedPOs);
+    const blocked = removed.find((e) => e._count.shipments > 0 || (e.productionOrderId && started.has(e.productionOrderId)));
     if (blocked) {
-      throw new Error(`"${blocked.model}" satırı silinemez: sevkiyatı veya üretim takibi var. Durumunu "İptal" yapabilirsiniz.`);
+      throw new Error(`"${blocked.model}" satırı silinemez: sevkiyatı veya başlamış görevi var. Durumunu "İptal" yapabilirsiniz.`);
     }
 
     await prisma.$transaction([
       prisma.salesOrderLine.deleteMany({ where: { id: { in: removed.map((r) => r.id) } } }),
+      // Hiç başlamamış görevler satırla birlikte silinir
+      prisma.productionOrder.deleteMany({ where: { id: { in: removedPOs } } }),
       ...ls.map((l, i) =>
         l.id
           ? prisma.salesOrderLine.update({ where: { id: l.id }, data: lineData(l, i) })
           : prisma.salesOrderLine.create({ data: { ...lineData(l, i), salesOrderId: order.id } }),
       ),
     ]);
+
+    // Termini değişen satırların (henüz başlamamış) görev tarihleri yeniden hesaplanır
+    const time = (d: Date | null) => d?.getTime() ?? null;
+    for (const l of ls) {
+      const prev = l.id ? existing.find((e) => e.id === l.id) : undefined;
+      if (prev?.productionOrderId && time(prev.deliveryDate) !== time(l.deliveryDate)) await rescheduleLine(prev.id);
+    }
+    // Yeni (veya henüz görevi olmayan) açık satırlara görev açılır
+    const pending = await prisma.salesOrderLine.findMany({
+      where: { salesOrderId: order.id, productionOrderId: null, status: { in: ["RECEIVED", "IN_PRODUCTION"] } },
+      select: { id: true },
+      orderBy: { sortOrder: "asc" },
+    });
+    await openProductionForLines(pending.map((p) => p.id), s.uid);
+
     revalidatePath(`/sales/${order.id}`);
+    revalidatePath("/orders");
+    revalidatePath("/tasks");
     revalidatePath("/sales");
   });
 }
@@ -194,8 +227,16 @@ export async function saveSalesLines(orderId: string, lines: SalesLineInput[]): 
 async function deleteSalesOrderImpl(fd: FormData) {
   const s = await auth();
   const order = await manageableSales(s, String(fd.get("id")));
-  // Bağlı üretim siparişleri silinmez; yalnızca bağlantı kopar.
-  await prisma.salesOrder.delete({ where: { id: order.id } });
+  // Hiç başlamamış görev takipleri siparişle birlikte silinir; başlamış olanlar korunur (yalnızca bağlantı kopar).
+  const linked = (
+    await prisma.salesOrderLine.findMany({ where: { salesOrderId: order.id, productionOrderId: { not: null } }, select: { productionOrderId: true } })
+  ).map((l) => l.productionOrderId!);
+  const started = await startedProductionIds(linked);
+  await prisma.$transaction([
+    prisma.salesOrder.delete({ where: { id: order.id } }),
+    prisma.productionOrder.deleteMany({ where: { id: { in: linked.filter((x) => !started.has(x)) } } }),
+  ]);
+  revalidatePath("/orders");
   revalidatePath("/sales");
   redirect("/sales");
 }
@@ -223,6 +264,8 @@ const shipmentSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Sevk tarihi gerekli.").transform(parseDateInput),
   quantity: z.coerce.number().int("Adet tam sayı olmalı.").positive("Adet 0'dan büyük olmalı."),
   note: optText(300),
+  /** İşaretliyse adet eksik olsa bile satır "Yüklendi" olur */
+  markShipped: z.string().optional().transform((v) => v === "on"),
 });
 
 async function addShipmentImpl(fd: FormData) {
@@ -230,8 +273,10 @@ async function addShipmentImpl(fd: FormData) {
   const d = shipmentSchema.parse(Object.fromEntries(fd));
   const line = await prisma.salesOrderLine.findFirst({ where: { id: d.lineId, salesOrder: salesScope(s) } });
   if (!line) throw new Error("Satır bulunamadı.");
+  if (line.status === "CANCELLED") throw new Error("İptal edilmiş satıra yükleme girilemez.");
   await prisma.shipment.create({ data: { lineId: line.id, date: d.date, quantity: d.quantity, note: d.note } });
-  await syncLineShipped(line.id);
+  if (d.markShipped) await prisma.salesOrderLine.update({ where: { id: line.id }, data: { status: "SHIPPED" } });
+  else await syncLineShipped(line.id);
   revalidatePath(`/sales/${line.salesOrderId}`);
   revalidatePath("/sales");
 }
@@ -300,67 +345,45 @@ export async function deletePayment(_: FormState, fd: FormData) {
 
 // ─── Üretime açma ──────────────────────────────────────────────
 
-/** Sipariş satırından üretim takibi (ProductionOrder) oluşturur. */
+/** Sipariş satırından seçilen ürün tipiyle üretim takibi ve görevleri oluşturur. */
 async function openProductionImpl(fd: FormData) {
   const s = await auth();
   const line = await prisma.salesOrderLine.findFirst({
     where: { id: String(fd.get("lineId")), salesOrder: salesScope(s) },
-    include: { salesOrder: true, sizeSet: true },
   });
   if (!line) throw new Error("Satır bulunamadı.");
   if (line.productionOrderId) throw new Error("Bu satır zaten üretimde takip ediliyor.");
   if (line.status === "CANCELLED") throw new Error("İptal edilmiş satır üretime açılamaz.");
+  if (sumQty(line.quantities) <= 0) throw new Error("Satırda adet yok.");
 
-  const product = await prisma.productType.findFirst({
-    where: { id: String(fd.get("productTypeId")), active: true },
-    include: { components: { where: { required: true }, orderBy: { sortOrder: "asc" } } },
-  });
+  const product = await prisma.productType.findFirst({ where: { id: String(fd.get("productTypeId")), active: true } });
   if (!product) throw new Error("Ürün tipi seçilmeli.");
 
-  const quantity = sumQty(line.quantities);
-  if (quantity <= 0) throw new Error("Satırda adet yok.");
-  const sizeBreakdown = Object.fromEntries(
-    line.quantities.map((q, i) => [line.sizeSet?.sizes[i] || `#${i + 1}`, q] as const).filter(([, q]) => q > 0),
-  );
-  const so = line.salesOrder;
-
-  const po = await prisma.productionOrder.create({
-    data: {
-      code: await nextOrderCode(),
-      modelName: line.model,
-      productTypeId: product.id,
-      companyId: so.companyId,
-      customerId: so.customerId,
-      quantity,
-      color: line.color,
-      sizeBreakdown,
-      dueDate: line.deliveryDate,
-      notes: [`Sipariş ${so.code}${so.customerOrderNo ? ` / ${so.customerOrderNo}` : ""}`, line.fabric && `Kumaş: ${line.fabric}`]
-        .filter(Boolean)
-        .join("\n"),
-      createdById: s.uid,
-      components: {
-        create: product.components.map((t, i) => ({
-          template: { connect: { id: t.id } },
-          name: t.name,
-          category: t.category,
-          // Ana kumaş için siparişteki kumaş bilgisi kullanılır
-          spec: t.category === "FABRIC" && i === 0 && line.fabric ? line.fabric : t.defaultSpec,
-          unit: t.defaultUnit,
-          quantity: t.perUnitQty ? Math.ceil(t.perUnitQty * quantity * 100) / 100 : null,
-          sortOrder: i,
-        })),
-      },
-    },
-  });
-  await prisma.salesOrderLine.update({
-    where: { id: line.id },
-    data: { productionOrderId: po.id, ...(line.status === "RECEIVED" ? { status: "IN_PRODUCTION" as const } : {}) },
-  });
-  revalidatePath(`/sales/${so.id}`);
+  await openProductionForLine(line.id, s.uid, product.id);
+  revalidatePath(`/sales/${line.salesOrderId}`);
   revalidatePath("/sales");
   revalidatePath("/orders");
+  revalidatePath("/tasks");
 }
 export async function openProduction(_: FormState, fd: FormData) {
   return withFormState(() => openProductionImpl(fd));
+}
+
+/** Görevi olmayan açık (Alındı/Üretimde) satırlara standart görevleri toplu açar. */
+async function openMissingProductionImpl() {
+  const s = await auth();
+  const lines = await prisma.salesOrderLine.findMany({
+    where: { ...LINES_WITHOUT_TASKS, salesOrder: salesScope(s) },
+    select: { id: true, productionOrderId: true },
+    orderBy: [{ salesOrder: { orderDate: "asc" } }, { sortOrder: "asc" }],
+  });
+  await openProductionForLines(lines.filter((l) => !l.productionOrderId).map((l) => l.id), s.uid);
+  // Daha önce elle üretime açılmış ama planı oluşturulmamış satırlar
+  for (const l of lines) if (l.productionOrderId) await createTasksForLinkedLine(l.id);
+  revalidatePath("/sales");
+  revalidatePath("/orders");
+  revalidatePath("/tasks");
+}
+export async function openMissingProduction(): Promise<FormState> {
+  return withFormState(() => openMissingProductionImpl());
 }

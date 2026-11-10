@@ -43,6 +43,7 @@ export function ImportWizard({ companies }: { companies: { id: string; name: str
           <li>{result.created} sipariş, {result.lines} satır oluşturuldu.</li>
           {!!result.newCustomers && <li>{result.newCustomers} yeni müşteri eklendi.</li>}
           {!!result.payments && <li>{result.payments} siparişe tahsilat (ALINAN BEDEL) girildi.</li>}
+          {!!result.tasksOpened && <li>{result.tasksOpened} açık satıra görevler (kumaş → kutu/paket) otomatik açıldı.</li>}
           {!!result.skipped?.length && <li>Zaten kayıtlı olduğu için atlanan sipariş kodları: {result.skipped.join(", ")}</li>}
         </ul>
         <Link href="/sales" className="btn-primary">Sipariş listesine git</Link>

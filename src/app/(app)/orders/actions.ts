@@ -9,6 +9,7 @@ import { nextOrderCode } from "@/lib/codes";
 import { withFormState, type FormState } from "@/lib/form";
 import { parseDateInput, today } from "@/lib/labels";
 import { syncOrderStatus } from "@/lib/progress";
+import { syncLineFromTasks } from "@/lib/salesProduction";
 import { orderScope, taskScope } from "@/lib/scope";
 import { requireRole, requireSession } from "@/lib/session";
 import type { SessionPayload } from "@/lib/jwt";
@@ -243,6 +244,7 @@ async function updateTaskImpl(formData: FormData) {
     },
   });
   revalidatePath(`/orders/${task.orderId}`);
+  revalidatePath("/sales");
 }
 
 const STATUSES: TaskStatus[] = ["PENDING", "IN_PROGRESS", "DONE", "BLOCKED"];
@@ -267,9 +269,11 @@ async function setTaskStatusImpl(formData: FormData) {
     },
   });
   await syncOrderStatus(task.orderId);
+  await syncLineFromTasks(task.orderId);
   revalidatePath(`/orders/${task.orderId}`);
   revalidatePath("/tasks");
   revalidatePath("/dashboard");
+  revalidatePath("/sales");
 }
 
 async function deleteTaskImpl(formData: FormData) {
