@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ActionForm } from "@/components/ActionForm";
 import { Badge, PageHeader } from "@/components/ui";
 import { prisma } from "@/lib/db";
-import { ORG_TYPE_LABELS } from "@/lib/labels";
+import { ORG_TYPE_LABELS, ORG_TYPE_TONES } from "@/lib/labels";
 import { orgScope } from "@/lib/scope";
 import { requireRole } from "@/lib/session";
 import { createOrganization } from "../actions";
@@ -18,7 +18,7 @@ export default async function OrganizationsPage() {
 
   return (
     <>
-      <PageHeader title="Firmalar" subtitle="Firma, alt firma (fason atölye) ve müşteriler" />
+      <PageHeader title="Firmalar" subtitle="Firma, alt firma (fason atölye), müşteri ve tedarikçiler" />
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         <div className="card overflow-x-auto">
           <table className="w-full min-w-[560px]">
@@ -38,7 +38,7 @@ export default async function OrganizationsPage() {
                     {(o.phone || o.email) && <div className="text-xs font-normal text-slate-500">{[o.phone, o.email].filter(Boolean).join(" · ")}</div>}
                   </td>
                   <td className="td">
-                    <Badge tone={o.type === "COMPANY" ? "blue" : o.type === "SUBCOMPANY" ? "amber" : "green"}>{ORG_TYPE_LABELS[o.type]}</Badge>
+                    <Badge tone={ORG_TYPE_TONES[o.type]}>{ORG_TYPE_LABELS[o.type]}</Badge>
                   </td>
                   <td className="td">{o.parent?.name ?? "—"}</td>
                   <td className="td text-right tabular-nums">{o._count.users}</td>
@@ -61,11 +61,12 @@ export default async function OrganizationsPage() {
               {s.role === "DEVELOPER" && <option value="COMPANY">Firma</option>}
               <option value="SUBCOMPANY">Alt Firma</option>
               <option value="CUSTOMER">Müşteri</option>
+              <option value="SUPPLIER">Tedarikçi</option>
             </select>
           </div>
           {s.role === "DEVELOPER" && (
             <div>
-              <label className="label">Bağlı firma (alt firma / müşteri için)</label>
+              <label className="label">Bağlı firma (alt firma / müşteri / tedarikçi için)</label>
               <select name="parentId" className="input">
                 <option value="">—</option>
                 {companies.map((c) => (

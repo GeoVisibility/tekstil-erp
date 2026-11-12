@@ -22,6 +22,7 @@ enum OrgType {
   COMPANY
   SUBCOMPANY
   CUSTOMER
+  SUPPLIER // Tedarikçi: kumaş, malzeme vb. alınan firmalar (kullanıcısı olmaz)
 }
 
 model Organization {

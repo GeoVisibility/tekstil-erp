@@ -11,7 +11,7 @@ import { createUser, toggleUserActive } from "../actions";
 export default async function UsersPage() {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const allOrgs = await prisma.organization.findMany({ where: orgScope(s), orderBy: [{ type: "asc" }, { name: "asc" }] });
-  const orgs = allOrgs.filter((o) => o.active); // yeni kullanıcı yalnızca aktif kayda bağlanabilir
+  const orgs = allOrgs.filter((o) => o.active && o.type !== "SUPPLIER"); // yalnızca aktif kayda bağlanır; tedarikçinin kullanıcısı olmaz
   const users = await prisma.user.findMany({
     where: s.role === "DEVELOPER" ? {} : { organizationId: { in: allOrgs.map((o) => o.id) } },
     include: { organization: { select: { name: true } } },

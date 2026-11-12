@@ -6,17 +6,38 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { OrgType, Role } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { ORG_TYPE_LABELS } from "@/lib/labels";
 import { withFormState, type FormState } from "@/lib/form";
 import { requireRole } from "@/lib/session";
 import { orgUsage, userUsage } from "@/lib/usage";
 
 const orgSchema = z.object({
-  name: z.string().trim().min(2, "Ad en az 2 karakter olmalı."),
-  type: z.enum(["COMPANY", "SUBCOMPANY", "CUSTOMER"], "Geçersiz organizasyon tipi."),
+  // Fazla boşluklar tek boşluğa indirilir ("VLAYN  " ile "VLAYN" aynı sayılır)
+  name: z.string().transform((v) => v.replace(/\s+/g, " ").trim()).pipe(z.string().min(2, "Ad en az 2 karakter olmalı.")),
+  type: z.enum(["COMPANY", "SUBCOMPANY", "CUSTOMER", "SUPPLIER"], "Geçersiz organizasyon tipi."),
   parentId: z.string().optional(),
   phone: z.string().trim().optional(),
   email: z.string().trim().optional(),
 });
+
+/** Ad karşılaştırma anahtarı: boşluklar, büyük/küçük harf ve i/ı/İ/I farkı yok sayılır. */
+const orgNameKey = (v: string) => v.replace(/\s+/g, " ").trim().toLocaleUpperCase("tr-TR").replace(/İ/g, "I");
+
+/** Aynı firmaya bağlı, aynı tipte ve aynı adda ikinci kaydı engeller (pasif kayıtlar dahil). */
+async function assertUniqueOrgName(name: string, type: OrgType, parentId: string | null, excludeId?: string) {
+  // Türkçe harfler (Ş/ş, Ç/ç, İ/i) veritabanı harmanlamasına bırakılmadan burada karşılaştırılır
+  const siblings = await prisma.organization.findMany({
+    where: { type, parentId, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    select: { name: true, active: true },
+  });
+  const key = orgNameKey(name);
+  const dup = siblings.find((o) => orgNameKey(o.name) === key);
+  if (dup) {
+    throw new Error(
+      `"${dup.name}" adında bir ${ORG_TYPE_LABELS[type].toLocaleLowerCase("tr-TR")} zaten kayıtlı${dup.active ? "" : " (pasif durumda)"}. Mevcut kaydı kullanın.`,
+    );
+  }
+}
 
 async function createOrganizationImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
@@ -33,9 +54,10 @@ async function createOrganizationImpl(formData: FormData) {
     parentId = null;
   } else {
     const parent = parentId ? await prisma.organization.findFirst({ where: { id: parentId, type: "COMPANY" } }) : null;
-    if (!parent) throw new Error("Alt firma ve müşteriler bir firmaya bağlı olmalı.");
+    if (!parent) throw new Error("Alt firma, müşteri ve tedarikçiler bir firmaya bağlı olmalı.");
   }
 
+  await assertUniqueOrgName(d.name, type, parentId);
   await prisma.organization.create({
     data: { name: d.name, type, parentId, phone: d.phone || null, email: d.email || null },
   });
@@ -50,7 +72,11 @@ const userSchema = z.object({
   role: z.enum(["DEVELOPER", "COMPANY", "SUBCOMPANY", "CUSTOMER"]).optional(),
 });
 
-const ROLE_FOR_ORG: Record<OrgType, Role> = { COMPANY: "COMPANY", SUBCOMPANY: "SUBCOMPANY", CUSTOMER: "CUSTOMER" };
+/** Kullanıcının rolü bağlı olduğu organizasyonun tipinden türetilir. Tedarikçilerin kullanıcısı olmaz. */
+function roleForOrg(type: OrgType): Role {
+  if (type === "SUPPLIER") throw new Error("Tedarikçilere kullanıcı bağlanamaz.");
+  return type;
+}
 
 async function createUserImpl(formData: FormData) {
   const s = await requireRole("DEVELOPER", "COMPANY");
@@ -75,7 +101,7 @@ async function createUserImpl(formData: FormData) {
     });
     if (!org) throw new Error("Geçersiz organizasyon.");
     // Rol, kullanıcının bağlı olduğu organizasyon tipinden türetilir
-    role = ROLE_FOR_ORG[org.type];
+    role = roleForOrg(org.type);
   }
 
   const exists = await prisma.user.findUnique({ where: { email: d.email } });
@@ -140,7 +166,7 @@ async function updateOrganizationImpl(formData: FormData) {
     if (type === "COMPANY") parentId = null;
     else {
       const parent = d.parentId ? await prisma.organization.findFirst({ where: { id: d.parentId, type: "COMPANY" } }) : null;
-      if (!parent) throw new Error("Alt firma ve müşteriler bir firmaya bağlı olmalı.");
+      if (!parent) throw new Error("Alt firma, müşteri ve tedarikçiler bir firmaya bağlı olmalı.");
       if (parent.id === org.id) throw new Error("Kayıt kendisine bağlanamaz.");
       parentId = parent.id;
     }
@@ -150,6 +176,12 @@ async function updateOrganizationImpl(formData: FormData) {
     }
   }
 
+  if (type === "SUPPLIER" && type !== org.type) {
+    const users = await prisma.user.count({ where: { organizationId: org.id } });
+    if (users) throw new Error("Kullanıcısı olan kayıt tedarikçiye çevrilemez. Önce kullanıcıları silin veya başka kayda taşıyın.");
+  }
+  await assertUniqueOrgName(d.name, type, parentId, org.id);
+
   await prisma.$transaction([
     prisma.organization.update({
       where: { id: org.id },
@@ -157,7 +189,7 @@ async function updateOrganizationImpl(formData: FormData) {
     }),
     // Tip değiştiyse kullanıcıların rolü de yeni tipe uyar
     ...(type !== org.type
-      ? [prisma.user.updateMany({ where: { organizationId: org.id, role: { not: "DEVELOPER" } }, data: { role: ROLE_FOR_ORG[type] } })]
+      ? [prisma.user.updateMany({ where: { organizationId: org.id, role: { not: "DEVELOPER" } }, data: { role: roleForOrg(type) } })]
       : []),
   ]);
   revalidatePath("/admin/organizations");
@@ -227,7 +259,7 @@ async function updateUserImpl(formData: FormData) {
     if (user.id === s.uid) throw new Error("Kendi organizasyonunuzu değiştiremezsiniz.");
     const org = await manageableOrg(s, d.organizationId);
     organizationId = org.id;
-    role = ROLE_FOR_ORG[org.type];
+    role = roleForOrg(org.type);
   }
 
   await prisma.user.update({

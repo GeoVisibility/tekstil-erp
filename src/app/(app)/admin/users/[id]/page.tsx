@@ -14,7 +14,7 @@ import { deleteUser, toggleUserActive, updateUser } from "../../actions";
 export default async function UserEditPage({ params }: { params: Promise<{ id: string }> }) {
   const s = await requireRole("DEVELOPER", "COMPANY");
   const { id } = await params;
-  const orgs = await prisma.organization.findMany({ where: { AND: [orgScope(s), { active: true }] }, orderBy: [{ type: "asc" }, { name: "asc" }] });
+  const orgs = await prisma.organization.findMany({ where: { AND: [orgScope(s), { active: true }, { type: { not: "SUPPLIER" } }] }, orderBy: [{ type: "asc" }, { name: "asc" }] });
   const user = await prisma.user.findFirst({
     where: { id, ...(s.role === "DEVELOPER" ? {} : { organizationId: { in: orgs.map((o) => o.id) } }) },
     include: { organization: { select: { id: true, name: true } } },

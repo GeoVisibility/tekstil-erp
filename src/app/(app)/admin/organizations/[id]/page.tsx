@@ -4,7 +4,7 @@ import { ActionForm } from "@/components/ActionForm";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { Badge, PageHeader } from "@/components/ui";
 import { prisma } from "@/lib/db";
-import { ORG_TYPE_LABELS } from "@/lib/labels";
+import { ORG_TYPE_LABELS, ORG_TYPE_TONES } from "@/lib/labels";
 import { orgScope } from "@/lib/scope";
 import { requireRole } from "@/lib/session";
 import { orgUsage } from "@/lib/usage";
@@ -33,7 +33,7 @@ export default async function OrganizationEditPage({ params }: { params: Promise
         title={org.name}
         subtitle={
           <span className="flex items-center gap-2">
-            <Badge tone={org.type === "COMPANY" ? "blue" : org.type === "SUBCOMPANY" ? "amber" : "green"}>{ORG_TYPE_LABELS[org.type]}</Badge>
+            <Badge tone={ORG_TYPE_TONES[org.type]}>{ORG_TYPE_LABELS[org.type]}</Badge>
             {!org.active && <Badge tone="red">Pasif</Badge>}
           </span>
         }
@@ -59,13 +59,14 @@ export default async function OrganizationEditPage({ params }: { params: Promise
                 {s.role === "DEVELOPER" && <option value="COMPANY">Firma</option>}
                 <option value="SUBCOMPANY">Alt Firma</option>
                 <option value="CUSTOMER">Müşteri</option>
+              <option value="SUPPLIER">Tedarikçi</option>
               </select>
             )}
             <p className="mt-1 text-xs text-slate-500">Tip değişirse bu kayda bağlı kullanıcıların yetkisi de değişir.</p>
           </div>
           {s.role === "DEVELOPER" ? (
             <div>
-              <label className="label">Bağlı firma (alt firma / müşteri için)</label>
+              <label className="label">Bağlı firma (alt firma / müşteri / tedarikçi için)</label>
               <select name="parentId" defaultValue={org.parentId ?? ""} className="input">
                 <option value="">—</option>
                 {companies.map((c) => (

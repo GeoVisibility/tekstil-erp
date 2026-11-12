@@ -34,6 +34,14 @@ export const ORG_TYPE_LABELS: Record<OrgType, string> = {
   COMPANY: "Firma",
   SUBCOMPANY: "Alt Firma",
   CUSTOMER: "Müşteri",
+  SUPPLIER: "Tedarikçi",
+};
+
+export const ORG_TYPE_TONES: Record<OrgType, "blue" | "amber" | "green" | "gray"> = {
+  COMPANY: "blue",
+  SUBCOMPANY: "amber",
+  CUSTOMER: "green",
+  SUPPLIER: "gray",
 };
 
 export type Tone = "gray" | "blue" | "amber" | "green" | "red";
